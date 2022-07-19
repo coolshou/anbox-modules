@@ -2445,11 +2445,11 @@ static int binder_translate_binder(struct flat_binder_object *fp,
 		ret = -EINVAL;
 		goto done;
 	}
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,2))
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,2))
 	if (security_binder_transfer_binder(proc->cred, target_proc->cred)) {
-#else
-	if (security_binder_transfer_binder(proc->tsk, target_proc->tsk)) {
-#endif
+ #else
+ 	if (security_binder_transfer_binder(proc->tsk, target_proc->tsk)) {
+ #endif
 		ret = -EPERM;
 		goto done;
 	}
@@ -2495,11 +2495,11 @@ static int binder_translate_handle(struct flat_binder_object *fp,
 				  proc->pid, thread->pid, fp->handle);
 		return -EINVAL;
 	}
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,2))
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,2))
 	if (security_binder_transfer_binder(proc->cred, target_proc->cred)) {
-#else
-	if (security_binder_transfer_binder(proc->tsk, target_proc->tsk)) {
-#endif
+ #else
+ 	if (security_binder_transfer_binder(proc->tsk, target_proc->tsk)) {
+ #endif
 		ret = -EPERM;
 		goto done;
 	}
@@ -2587,11 +2587,11 @@ static int binder_translate_fd(u32 fd, binder_size_t fd_offset,
 		ret = -EBADF;
 		goto err_fget;
 	}
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,2))
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,2))
 	ret = security_binder_transfer_file(proc->cred, target_proc->cred, file);
-#else
-	ret = security_binder_transfer_file(proc->tsk, target_proc->tsk, file);
-#endif
+ #else
+ 	ret = security_binder_transfer_file(proc->tsk, target_proc->tsk, file);
+ #endif
 	if (ret < 0) {
 		ret = -EPERM;
 		goto err_security;
@@ -2862,7 +2862,11 @@ static void binder_transaction(struct binder_proc *proc,
 	binder_size_t last_fixup_min_off = 0;
 	struct binder_context *context = proc->context;
 	int t_debug_id = atomic_inc_return(&binder_last_id);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+	struct lsmcontext secctx;
+#else
 	char *secctx = NULL;
+#endif
 	u32 secctx_sz = 0;
 
 	e = binder_transaction_log_add(&binder_transaction_log);
@@ -2989,13 +2993,13 @@ static void binder_transaction(struct binder_proc *proc,
 			return_error_line = __LINE__;
 			goto err_invalid_target_handle;
 		}
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,2))
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,2))
 		if (security_binder_transaction(proc->cred,
 						target_proc->cred) < 0) {
-#else
-		if (security_binder_transaction(proc->tsk,
-						target_proc->tsk) < 0) {
-#endif
+ #else
+ 		if (security_binder_transaction(proc->tsk,
+ 						target_proc->tsk) < 0) {
+ #endif
 			return_error = BR_FAILED_REPLY;
 			return_error_param = -EPERM;
 			return_error_line = __LINE__;
@@ -3118,15 +3122,24 @@ static void binder_transaction(struct binder_proc *proc,
 	t->priority = task_nice(current);
 
 	if (target_node && target_node->txn_security_ctx) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+		struct lsmblob blob;
+#else
 		u32 secid;
+#endif
 		size_t added_size;
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+		security_cred_getsecid(proc->cred, &blob);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
 		security_task_getsecid_obj(proc->tsk, &secid);
 #else
 		security_task_getsecid(proc->tsk, &secid);
 #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+		ret = security_secid_to_secctx(&blob, &secctx, &secctx_sz);
+#else
 		ret = security_secid_to_secctx(secid, &secctx, &secctx_sz);
+#endif
 		if (ret) {
 			return_error = BR_FAILED_REPLY;
 			return_error_param = ret;
@@ -3160,7 +3173,11 @@ static void binder_transaction(struct binder_proc *proc,
 		t->buffer = NULL;
 		goto err_binder_alloc_buf_failed;
 	}
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+	if (secctx.context) {
+#else
 	if (secctx) {
+#endif
 		int err;
 		size_t buf_offset = ALIGN(tr->data_size, sizeof(void *)) +
 				    ALIGN(tr->offsets_size, sizeof(void *)) +
@@ -3170,13 +3187,22 @@ static void binder_transaction(struct binder_proc *proc,
 		t->security_ctx = (uintptr_t)t->buffer->user_data + buf_offset;
 		err = binder_alloc_copy_to_buffer(&target_proc->alloc,
 						  t->buffer, buf_offset,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+						  secctx.context, secctx.len);
+#else
 						  secctx, secctx_sz);
+#endif
 		if (err) {
 			t->security_ctx = 0;
 			WARN_ON(1);
 		}
-		security_release_secctx(secctx, secctx_sz);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+		security_release_secctx(&secctx);
+#else
+		//security_release_secctx(secctx, secctx_sz);
+		kfree(secctx);
 		secctx = NULL;
+#endif
 	}
 	t->buffer->debug_id = t->debug_id;
 	t->buffer->transaction = t;
@@ -3509,8 +3535,18 @@ err_copy_data_failed:
 	binder_alloc_free_buf(&target_proc->alloc, t->buffer);
 err_binder_alloc_buf_failed:
 err_bad_extra_size:
-	if (secctx)
-		security_release_secctx(secctx, secctx_sz);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+	if (secctx.context) {
+#else
+	if (secctx) {
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+		security_release_secctx(&secctx);
+#else
+		//security_release_secctx(secctx, secctx_sz);
+		kfree(secctx);
+#endif
+	}
 err_get_secctx_failed:
 	kfree(tcomplete);
 	binder_stats_deleted(BINDER_STAT_TRANSACTION_COMPLETE);
@@ -4937,11 +4973,11 @@ static int binder_ioctl_set_ctx_mgr(struct file *filp,
 		ret = -EBUSY;
 		goto out;
 	}
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,2))
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,2))
 	ret = security_binder_set_context_mgr(proc->cred);
-#else
-	ret = security_binder_set_context_mgr(proc->tsk);
-#endif
+ #else
+ 	ret = security_binder_set_context_mgr(proc->tsk);
+ #endif
 	if (ret < 0)
 		goto out;
 	if (uid_valid(context->binder_context_mgr_uid)) {
