@@ -2869,8 +2869,10 @@ static void binder_transaction(struct binder_proc *proc,
 	binder_size_t last_fixup_min_off = 0;
 	struct binder_context *context = proc->context;
 	int t_debug_id = atomic_inc_return(&binder_last_id);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0)
-	struct lsmcontext lsmctx;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
+	struct lsm_context lsmctx = {};
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0)
+	struct lsmcontext lsmctx = {};
 #else
 	char *secctx = NULL;
 	u32 secctx_sz = 0;
@@ -3130,7 +3132,10 @@ static void binder_transaction(struct binder_proc *proc,
 	if (target_node && target_node->txn_security_ctx) {
 		u32 secid;
 		size_t added_size;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
+		ret = security_secid_to_secctx(secid, &lsmctx);
+		if (ret < 0) {
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0)
 		security_cred_getsecid(proc->cred, &secid);
 		ret = security_secid_to_secctx(secid, &lsmctx);
 		if (ret < 0) {
